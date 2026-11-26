@@ -1,0 +1,19 @@
+{
+  "name": "anime-slides",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Animated Marp deck for Algebraic Geometry with transitions, entrance animations, morphing, and click-to-reveal fragments",
+  "scripts": {
+    "preview": "marp --theme-set theme.css -p slides.md",
+    "html": "marp --theme-set theme.css --html slides.md -o slides.html && node inject-fragments.js",
+    "pdf": "marp --theme-set theme.css --pdf slides.md -o slides.pdf",
+    "pptx": "marp --theme-set theme.css slides.md -o slides.pptx",
+    "inject": "node inject-fragments.js"
+  },
+  "devDependencies": {
+    "@marp-team/marp-cli": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
