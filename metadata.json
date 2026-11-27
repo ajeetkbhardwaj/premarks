@@ -1,0 +1,7 @@
+{
+  "name": "Premarks",
+  "description": "Build animated, publication-grade Marp presentations from curated templates across STEM, engineering, business, and editorial disciplines.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

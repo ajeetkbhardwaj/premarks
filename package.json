@@ -4,10 +4,15 @@
   "private": true,
   "description": "Animated Marp deck for Algebraic Geometry with transitions, entrance animations, morphing, and click-to-reveal fragments",
   "scripts": {
+    "dev": "tsx server.ts",
+    "build": "vite build && npm run html",
+    "start": "NODE_ENV=production tsx server.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "lint": "npx tsc --noEmit && node --check inject-fragments.js && node --check fragments.js && node --check lib/themes.js && node --check lib/templates.js && node --check lib/pptxExporter.js && node --check lib/archiveBuilder.js && node --check cli/bin/premarks.js && node --check cli/bin/premarks-mcp.js && node --check integrations/vscode-extension/extension.js",
     "preview": "marp --theme-set theme.css -p slides.md",
-    "html": "marp --theme-set theme.css --html slides.md -o slides.html && node inject-fragments.js",
-    "pdf": "marp --theme-set theme.css --pdf slides.md -o slides.pdf",
-    "pptx": "marp --theme-set theme.css slides.md -o slides.pptx",
+    "html": "marp --no-stdin --theme-set theme.css --html slides.md -o slides.html && node inject-fragments.js",
+    "pdf": "marp --no-stdin --theme-set theme.css --pdf slides.md -o slides.pdf",
+    "pptx": "marp --no-stdin --theme-set theme.css slides.md -o slides.pptx",
     "inject": "node inject-fragments.js"
   },
   "devDependencies": {
@@ -15,5 +20,33 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@google/genai": "^3.6.1",
+    "@marp-team/marp-core": "^4.4.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/express": "^5.0.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.3",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "dotenv": "^18.0.10",
+    "drizzle-kit": "^0.31.11",
+    "drizzle-orm": "^0.45.4",
+    "express": "^5.3.0",
+    "firebase": "^13.4.0",
+    "firebase-admin": "^14.5.1",
+    "lucide-react": "^1.81.0",
+    "mermaid": "^12.3.0",
+    "pg": "^8.23.1",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "zod": "^4.6.7"
   }
 }

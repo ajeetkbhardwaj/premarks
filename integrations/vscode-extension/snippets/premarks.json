@@ -1,0 +1,106 @@
+{
+  "Premarks Frontmatter": {
+    "prefix": "pm-frontmatter",
+    "body": [
+      "---",
+      "marp: true",
+      "theme: ${1|anime,theorem,swiss,executive,obsidian,monograph|}",
+      "size: 16:9",
+      "paginate: true",
+      "math: mathjax",
+      "transition: ${2|fade 0.5s,rise 0.55s,veil 0.55s,focus 0.6s,zoom 0.65s|}",
+      "---",
+      "",
+      "<!-- _class: lead animate-in -->",
+      "",
+      "<span class=\"eyebrow\">${3:Topic}</span>",
+      "",
+      "# ${4:Presentation Title}",
+      "",
+      "## ${5:Subtitle or Presenter}",
+      "$0"
+    ],
+    "description": "Initialize a Premarks Marp presentation deck"
+  },
+  "Premarks Lead Slide": {
+    "prefix": "pm-lead",
+    "body": [
+      "---",
+      "",
+      "<!-- _class: lead animate-in -->",
+      "",
+      "<span class=\"eyebrow\">${1:Section}</span>",
+      "",
+      "# ${2:Headline}",
+      "",
+      "## ${3:Subheadline}",
+      "$0"
+    ],
+    "description": "Insert a centered hero title slide"
+  },
+  "Premarks Two-Column Cards": {
+    "prefix": "pm-cards",
+    "body": [
+      "<div class=\"row\">",
+      "",
+      "<div class=\"card\" data-fragment=\"1\">",
+      "",
+      "### ${1:First Card}",
+      "${2:Summary detail}",
+      "",
+      "</div>",
+      "",
+      "<div class=\"card\" data-fragment=\"2\">",
+      "",
+      "### ${3:Second Card}",
+      "${4:Summary detail}",
+      "",
+      "</div>",
+      "",
+      "</div>$0"
+    ],
+    "description": "Insert two animated side-by-side cards"
+  },
+  "Premarks Formula Box": {
+    "prefix": "pm-formula",
+    "body": [
+      "<div class=\"formula-box\">",
+      "",
+      "$$",
+      "${1:\\\\int_{-\\\\infty}^{\\\\infty} e^{-x^2}\\\\,dx = \\\\sqrt{\\\\pi}}",
+      "$$",
+      "",
+      "</div>$0"
+    ],
+    "description": "Insert a styled MathJax display equation"
+  },
+  "Premarks Mermaid Flowchart": {
+    "prefix": "pm-mermaid",
+    "body": [
+      "```mermaid",
+      "flowchart LR",
+      "    A[${1:Input}] --> B[${2:Engine}]",
+      "    B --> C[${3:Output}]",
+      "```$0"
+    ],
+    "description": "Insert a Mermaid flowchart diagram"
+  },
+  "Premarks Fragment Item": {
+    "prefix": "pm-fragment",
+    "body": [
+      "<div class=\"card\" data-fragment=\"${1:1}\">",
+      "",
+      "${2:Step content}",
+      "",
+      "</div>$0"
+    ],
+    "description": "Insert a click-to-reveal fragment block"
+  },
+  "Premarks Speaker Notes": {
+    "prefix": "pm-notes",
+    "body": [
+      "<!-- ${1:Speaker talking points visible only in Presenter Console} -->$0"
+    ],
+    "description": "Insert speaker notes comment"
+  }
+}

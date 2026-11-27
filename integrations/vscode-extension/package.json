@@ -1,0 +1,124 @@
+{
+  "name": "premarks-vscode",
+  "displayName": "Premarks Presentation Studio",
+  "description": "Write, live-preview, export (HTML/PPTX/PDF), and share Marp + MathJax + Mermaid presentations directly in VS Code.",
+  "version": "1.0.0",
+  "publisher": "premarks",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Snippets",
+    "Formatters"
+  ],
+  "keywords": [
+    "marp",
+    "markdown",
+    "slides",
+    "presentation",
+    "mathjax",
+    "mermaid"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown",
+    "onCommand:premarks.preview",
+    "onCommand:premarks.newFromTemplate",
+    "onCommand:premarks.insertBlock",
+    "onCommand:premarks.exportHtml",
+    "onCommand:premarks.exportPptx",
+    "onCommand:premarks.shareDeck"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "premarks.preview",
+        "title": "Premarks: Live Slide Preview"
+      },
+      {
+        "command": "premarks.newFromTemplate",
+        "title": "Premarks: New Deck from Template"
+      },
+      {
+        "command": "premarks.insertBlock",
+        "title": "Premarks: Insert Layout, Equation, or Mermaid"
+      },
+      {
+        "command": "premarks.exportHtml",
+        "title": "Premarks: Export Animated HTML"
+      },
+      {
+        "command": "premarks.exportPptx",
+        "title": "Premarks: Export PowerPoint (.pptx)"
+      },
+      {
+        "command": "premarks.shareDeck",
+        "title": "Premarks: Publish & Copy Share Link"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "premarks.preview",
+        "key": "ctrl+alt+p",
+        "mac": "cmd+alt+p",
+        "when": "editorLangId == markdown"
+      },
+      {
+        "command": "premarks.insertBlock",
+        "key": "ctrl+alt+i",
+        "mac": "cmd+alt+i",
+        "when": "editorLangId == markdown"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "premarks.preview",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "premarks.preview",
+          "when": "editorLangId == markdown",
+          "group": "premarks@1"
+        },
+        {
+          "command": "premarks.insertBlock",
+          "when": "editorLangId == markdown",
+          "group": "premarks@2"
+        },
+        {
+          "command": "premarks.exportPptx",
+          "when": "editorLangId == markdown",
+          "group": "premarks@3"
+        }
+      ]
+    },
+    "snippets": [
+      {
+        "language": "markdown",
+        "path": "./snippets/premarks.json"
+      }
+    ],
+    "configuration": {
+      "title": "Premarks",
+      "properties": {
+        "premarks.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "description": "Base URL of your Premarks presentation server."
+        },
+        "premarks.defaultTheme": {
+          "type": "string",
+          "default": "anime",
+          "enum": ["anime", "theorem", "swiss", "executive", "obsidian", "monograph"],
+          "description": "Default Premarks theme applied when exporting or previewing."
+        }
+      }
+    }
+  }
+}
