@@ -161,7 +161,28 @@ const UUID_ROADMAP_TASKS = [
 
 async function startServer() {
   const app = express();
+  app.set('trust proxy', true);
   app.use(express.json({ limit: '1mb' }));
+
+  // CORS & Preflight for remote MCP clients, CLI, and VS Code extension on ai.studio / *.run.app
+  app.use((req, res, next) => {
+    if (req.path === '/mcp' || req.path.startsWith('/api/')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-API-Key, Mcp-Session-Id',
+      );
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Expose-Headers',
+        'X-Export-Mode, X-RateLimit-Remaining, Retry-After',
+      );
+      if (req.method === 'OPTIONS') {
+        return res.status(204).end();
+      }
+    }
+    return next();
+  });
 
   // Readiness & Worker Telemetry
   app.get('/healthz', (_req: Request, res: Response) => {
@@ -633,6 +654,12 @@ async function startServer() {
     const origin = getSafeOrigin(req);
     const mcpAuth = req.auth!;
     delete req.auth;
+
+    const accept = String(req.headers.accept || '');
+    if (!accept.includes('application/json') || !accept.includes('text/event-stream')) {
+      req.headers.accept = 'application/json, text/event-stream';
+    }
+
     const server = createPremarksMcpServer(mcpAuth, origin);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

@@ -7,7 +7,7 @@ const path = require('path');
 const http = require('http');
 const os = require('os');
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const CONFIG_PATH = path.join(os.homedir(), '.premarks.json');
 const DEFAULT_SERVER_URL = process.env.PREMARKS_URL || 'http://127.0.0.1:3000';
 
@@ -27,6 +27,18 @@ function getServerUrl(flagUrl) {
   return String(flagUrl || process.env.PREMARKS_URL || cfg.serverUrl || DEFAULT_SERVER_URL).replace(/\/+$/, '');
 }
 
+function getApiKey(flagKey) {
+  const cfg = readConfig();
+  return String(flagKey || process.env.PREMARKS_API_KEY || cfg.apiKey || '').trim();
+}
+
+function buildHeaders(apiKey, includeJson = true) {
+  const headers = {};
+  if (includeJson) headers['Content-Type'] = 'application/json';
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  return headers;
+}
+
 function parseArgs(argv) {
   const positional = [];
   const flags = {};
@@ -38,6 +50,8 @@ function parseArgs(argv) {
       flags.version = true;
     } else if (arg === '--json') {
       flags.json = true;
+    } else if (arg === '--fix') {
+      flags.fix = true;
     } else if (arg.startsWith('--')) {
       const key = arg.slice(2);
       const next = argv[i + 1];
@@ -48,7 +62,7 @@ function parseArgs(argv) {
         flags[key] = true;
       }
     } else if (arg.startsWith('-') && arg.length === 2) {
-      const map = { f: 'format', o: 'out', t: 'theme', p: 'port', s: 'server' };
+      const map = { f: 'format', o: 'out', t: 'theme', p: 'port', s: 'server', k: 'api-key' };
       const key = map[arg[1]] || arg[1];
       const next = argv[i + 1];
       if (next && !next.startsWith('-')) {
@@ -94,20 +108,24 @@ Usage:
   premarks <command> [options]
 
 Commands:
-  templates [--field <name>]         List available discipline templates
-  themes                             List available presentation style themes
-  init [template-id] [out.md]        Create a Markdown deck from a template
-  build <deck.md> [-f html|pptx|print] [-o out]
-                                     Compile a presentation to HTML, PowerPoint, or Print HTML
-  dev <deck.md> [--port 4173]        Live-reload local preview server watching <deck.md>
-  share <deck.md> [--title <name>]   Publish a read-only share & embed URL
-  config <server-url>                Save default Premarks server URL (~/.premarks.json)
+  templates [--field <name>]           List available discipline templates
+  themes                               List available presentation style themes
+  init [template-id] [out.md]          Create a Markdown deck from a template
+  lint <deck.md> [--fix] [--json]      Audit slide density, overflow, contrast, and alt text
+  build <deck.md> [-f html|pptx|print|pdf] [-o out]
+                                       Compile a presentation to HTML, PPTX, Print HTML, or PDF
+  dev <deck.md> [--port 4173]          Live-reload local preview server watching <deck.md>
+  share <deck.md> [--title <name>]     Publish a read-only share & embed URL
+  config [server-url] [--api-key key]  Save Premarks server URL and/or API key (~/.premarks.json)
 
 Global Options:
-  -s, --server <url>   Premarks server URL (env: PREMARKS_URL)
-  -t, --theme <id>     Override theme (anime, theorem, swiss, executive, obsidian, monograph)
-  -v, --version        Show CLI version
-  -h, --help           Show help
+  -s, --server <url>     Premarks server URL (env: PREMARKS_URL)
+  -k, --api-key <key>    Personal Premarks API key (env: PREMARKS_API_KEY)
+  -t, --theme <id>       Override theme (anime, nordic, keynote, blueprint, atelier, theorem,
+                         swiss, executive, obsidian, monograph, beamer-madrid, metropolis,
+                         editorial-split, botanical-esg)
+  -v, --version          Show CLI version
+  -h, --help             Show help
 `);
 }
 
@@ -126,14 +144,24 @@ async function fetchJson(url, options) {
   return data;
 }
 
-async function cmdTemplates(serverUrl, flags) {
-  const { templates = [] } = await fetchJson(`${serverUrl}/api/templates`);
+async function cmdTemplates(serverUrl, apiKey, flags) {
+  const { templates = [] } = await fetchJson(`${serverUrl}/api/templates`, {
+    headers: buildHeaders(apiKey, false),
+  });
   const filtered = flags.field
     ? templates.filter((t) => t.field.toLowerCase().includes(String(flags.field).toLowerCase()))
     : templates;
 
   if (flags.json) {
-    console.log(JSON.stringify(filtered, null, 2));
+    const compact = filtered.map((t) => ({
+      id: t.id,
+      title: t.title,
+      field: t.field,
+      themeId: t.themeId,
+      slideCount: t.slideCount,
+      summary: t.summary,
+    }));
+    console.log(JSON.stringify(compact, null, 2));
     return;
   }
 
@@ -144,23 +172,36 @@ async function cmdTemplates(serverUrl, flags) {
   }
 }
 
-async function cmdThemes(serverUrl, flags) {
-  const { themes = [] } = await fetchJson(`${serverUrl}/api/themes`);
+async function cmdThemes(serverUrl, apiKey, flags) {
+  const { themes = [] } = await fetchJson(`${serverUrl}/api/themes`, {
+    headers: buildHeaders(apiKey, false),
+  });
   if (flags.json) {
-    console.log(JSON.stringify(themes, null, 2));
+    const compact = themes.map((t) => ({
+      id: t.id,
+      name: t.name,
+      tagline: t.tagline,
+      bestFor: t.bestFor,
+      isDark: t.isDark,
+      palette: t.palette,
+      fontPreview: t.fontPreview,
+    }));
+    console.log(JSON.stringify(compact, null, 2));
     return;
   }
   console.log(`Available Premarks Themes (${themes.length}):\n`);
   for (const t of themes) {
-    console.log(`  ${t.id.padEnd(14)} ${t.name} — ${t.tagline}`);
+    console.log(`  ${t.id.padEnd(16)} ${t.name} — ${t.tagline}`);
     console.log(`    Best for: ${t.bestFor}\n`);
   }
 }
 
-async function cmdInit(serverUrl, positional, flags) {
-  const templateId = positional[1] || 'algebraic-geometry-showcase';
+async function cmdInit(serverUrl, apiKey, positional, flags) {
+  const templateId = positional[1] || 'basic-clean-deck';
   const outFile = positional[2] || `${templateId}.md`;
-  const { templates = [] } = await fetchJson(`${serverUrl}/api/templates`);
+  const { templates = [] } = await fetchJson(`${serverUrl}/api/templates`, {
+    headers: buildHeaders(apiKey, false),
+  });
   const found = templates.find((t) => t.id === templateId);
   if (!found) {
     const ids = templates.map((t) => t.id).join(', ');
@@ -173,7 +214,46 @@ async function cmdInit(serverUrl, positional, flags) {
   console.log(`Next: premarks dev ${path.basename(targetPath)}`);
 }
 
-async function cmdBuild(serverUrl, positional, flags) {
+async function cmdLint(serverUrl, apiKey, positional, flags) {
+  const inputFile = positional[1];
+  if (!inputFile) throw new Error('Specify a Markdown file: premarks lint <deck.md>');
+  const resolvedInput = path.resolve(process.cwd(), inputFile);
+  const rawMd = fs.readFileSync(resolvedInput, 'utf8');
+
+  const report = await fetchJson(`${serverUrl}/api/lint`, {
+    method: 'POST',
+    headers: buildHeaders(apiKey, true),
+    body: JSON.stringify({ markdown: rawMd, autoFix: Boolean(flags.fix) }),
+  });
+
+  if (flags.fix && report.fixedMarkdown) {
+    fs.writeFileSync(resolvedInput, report.fixedMarkdown, 'utf8');
+  }
+
+  if (flags.json) {
+    console.log(JSON.stringify(report, null, 2));
+    if (!report.passed) process.exitCode = 1;
+    return;
+  }
+
+  console.log(`Deck Score: ${report.deckScore}/100 (${report.slideCount} slides) · ${report.passed ? 'PASSED' : 'NEEDS ATTENTION'}`);
+  if (flags.fix && report.fixedMarkdown) {
+    console.log(`Applied auto-fixes to ${resolvedInput}`);
+  }
+  if (!report.issues || report.issues.length === 0) {
+    console.log('No layout, overflow, contrast, or alt-text issues found.');
+  } else {
+    console.log('');
+    for (const issue of report.issues) {
+      const loc = issue.slideIndex !== null ? `Slide ${issue.slideIndex + 1}` : 'Deck';
+      console.log(`  [${issue.severity.toUpperCase()}] ${loc} (${issue.rule}): ${issue.message}`);
+      console.log(`    -> ${issue.suggestion}`);
+    }
+  }
+  if (!report.passed) process.exitCode = 1;
+}
+
+async function cmdBuild(serverUrl, apiKey, positional, flags) {
   const inputFile = positional[1];
   if (!inputFile) throw new Error('Specify a Markdown file: premarks build <deck.md>');
   const resolvedInput = path.resolve(process.cwd(), inputFile);
@@ -187,33 +267,45 @@ async function cmdBuild(serverUrl, positional, flags) {
     html: '/api/export-html',
     pptx: '/api/export-pptx',
     print: '/api/export-print',
-    pdf: '/api/export-print',
+    pdf: '/api/export-pdf',
   };
-  const extMap = { html: '.html', pptx: '.pptx', print: '.print.html', pdf: '.print.html' };
+  const extMap = { html: '.html', pptx: '.pptx', print: '.print.html', pdf: '.pdf' };
   const endpoint = endpointMap[format];
-  if (!endpoint) throw new Error(`Unsupported format "${format}". Use html, pptx, or print.`);
-
-  const defaultOut = path.join(
-    path.dirname(resolvedInput),
-    `${path.basename(resolvedInput, path.extname(resolvedInput))}${extMap[format]}`,
-  );
-  const outPath = path.resolve(process.cwd(), flags.out || defaultOut);
+  if (!endpoint) throw new Error(`Unsupported format "${format}". Use html, pptx, print, or pdf.`);
 
   const res = await fetch(`${serverUrl}${endpoint}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(apiKey, true),
     body: JSON.stringify({ markdown, themeId, title }),
   });
   if (!res.ok) {
     const errText = await res.text();
     throw new Error(`Build failed (${res.status}): ${errText}`);
   }
+
+  const exportMode = res.headers.get('X-Export-Mode');
+  let actualFormat = format;
+  let defaultExt = extMap[format];
+  if (format === 'pdf' && exportMode && exportMode !== 'pdf') {
+    actualFormat = 'print-html';
+    defaultExt = '.print.html';
+  }
+
+  const defaultOut = path.join(
+    path.dirname(resolvedInput),
+    `${path.basename(resolvedInput, path.extname(resolvedInput))}${defaultExt}`,
+  );
+  const outPath = path.resolve(process.cwd(), flags.out || defaultOut);
+
   const buf = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(outPath, buf);
-  console.log(`Built ${outPath} (${buf.length} bytes, format=${format}, theme=${themeId}).`);
+  console.log(`Built ${outPath} (${buf.length} bytes, format=${actualFormat}, theme=${themeId}).`);
+  if (format === 'pdf' && actualFormat === 'print-html') {
+    console.log('Note: Server headless Chromium unavailable; saved print-ready HTML (open and Print -> Save as PDF).');
+  }
 }
 
-async function cmdShare(serverUrl, positional, flags) {
+async function cmdShare(serverUrl, apiKey, positional, flags) {
   const inputFile = positional[1];
   if (!inputFile) throw new Error('Specify a Markdown file: premarks share <deck.md>');
   const resolvedInput = path.resolve(process.cwd(), inputFile);
@@ -224,7 +316,7 @@ async function cmdShare(serverUrl, positional, flags) {
 
   const data = await fetchJson(`${serverUrl}/api/shares`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: buildHeaders(apiKey, true),
     body: JSON.stringify({ title, markdown, themeId }),
   });
   const shareUrl = `${serverUrl}/?share=${encodeURIComponent(data.id)}`;
@@ -234,7 +326,7 @@ async function cmdShare(serverUrl, positional, flags) {
   console.log(`Embed URL: ${embedUrl}`);
 }
 
-async function cmdDev(serverUrl, positional, flags) {
+async function cmdDev(serverUrl, apiKey, positional, flags) {
   const inputFile = positional[1];
   if (!inputFile) throw new Error('Specify a Markdown file: premarks dev <deck.md>');
   const resolvedInput = path.resolve(process.cwd(), inputFile);
@@ -252,7 +344,7 @@ async function cmdDev(serverUrl, positional, flags) {
     const title = detectTitle(markdown, resolvedInput);
     const res = await fetch(`${serverUrl}/api/export-html`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildHeaders(apiKey, true),
       body: JSON.stringify({ markdown, themeId, title }),
     });
     if (!res.ok) throw new Error(`Render failed (${res.status})`);
@@ -303,17 +395,30 @@ setInterval(async () => {
   });
 }
 
-function cmdConfig(positional) {
-  const url = positional[1];
-  if (!url) {
-    const current = getServerUrl();
-    console.log(`Current Premarks server URL: ${current}`);
+function cmdConfig(positional, flags) {
+  const urlArg = positional[1] || (typeof flags.server === 'string' ? flags.server : '');
+  const apiKeyArg = typeof flags['api-key'] === 'string' ? flags['api-key'] : '';
+
+  if (!urlArg && !apiKeyArg) {
+    const currentUrl = getServerUrl();
+    const currentKey = getApiKey();
+    console.log(`Current Premarks server URL: ${currentUrl}`);
+    console.log(`API Key: ${currentKey ? `${currentKey.slice(0, 14)}...` : '(not set)'}`);
     return;
   }
-  const cleaned = String(url).replace(/\/+$/, '');
+
   const existing = readConfig();
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...existing, serverUrl: cleaned }, null, 2));
-  console.log(`Saved Premarks server URL to ${CONFIG_PATH}: ${cleaned}`);
+  const next = { ...existing };
+  if (urlArg) {
+    next.serverUrl = String(urlArg).replace(/\/+$/, '');
+  }
+  if (apiKeyArg) {
+    next.apiKey = apiKeyArg.trim();
+  }
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2));
+  console.log(`Saved Premarks CLI configuration to ${CONFIG_PATH}:`);
+  if (next.serverUrl) console.log(`  serverUrl: ${next.serverUrl}`);
+  if (next.apiKey) console.log(`  apiKey:    ${next.apiKey.slice(0, 14)}...`);
 }
 
 async function main() {
@@ -328,30 +433,36 @@ async function main() {
     return;
   }
 
+  if (cmd === 'config') {
+    cmdConfig(positional, flags);
+    return;
+  }
+
   const serverUrl = getServerUrl(flags.server);
+  const apiKey = getApiKey(flags['api-key']);
 
   switch (cmd) {
     case 'templates':
-      await cmdTemplates(serverUrl, flags);
+      await cmdTemplates(serverUrl, apiKey, flags);
       break;
     case 'themes':
-      await cmdThemes(serverUrl, flags);
+      await cmdThemes(serverUrl, apiKey, flags);
       break;
     case 'init':
-      await cmdInit(serverUrl, positional, flags);
+      await cmdInit(serverUrl, apiKey, positional, flags);
+      break;
+    case 'lint':
+      await cmdLint(serverUrl, apiKey, positional, flags);
       break;
     case 'build':
-      await cmdBuild(serverUrl, positional, flags);
+      await cmdBuild(serverUrl, apiKey, positional, flags);
       break;
     case 'share':
-      await cmdShare(serverUrl, positional, flags);
+      await cmdShare(serverUrl, apiKey, positional, flags);
       break;
     case 'dev':
     case 'watch':
-      await cmdDev(serverUrl, positional, flags);
-      break;
-    case 'config':
-      cmdConfig(positional);
+      await cmdDev(serverUrl, apiKey, positional, flags);
       break;
     default:
       throw new Error(`Unknown command "${cmd}". Run "premarks --help" for usage.`);

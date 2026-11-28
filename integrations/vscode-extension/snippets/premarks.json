@@ -4,11 +4,11 @@
     "body": [
       "---",
       "marp: true",
-      "theme: ${1|anime,theorem,swiss,executive,obsidian,monograph|}",
+      "theme: ${1|anime,nordic,keynote,blueprint,atelier,theorem,swiss,executive,obsidian,monograph,beamer-madrid,metropolis,editorial-split,botanical-esg|}",
       "size: 16:9",
       "paginate: true",
       "math: mathjax",
-      "transition: ${2|fade 0.5s,rise 0.55s,veil 0.55s,focus 0.6s,zoom 0.65s|}",
+      "transition: ${2|fade 0.5s,rise 0.55s,slide 0.5s,veil 0.55s,focus 0.6s,zoom 0.65s|}",
       "---",
       "",
       "<!-- _class: lead animate-in -->",

@@ -26,8 +26,10 @@
     "onCommand:premarks.preview",
     "onCommand:premarks.newFromTemplate",
     "onCommand:premarks.insertBlock",
+    "onCommand:premarks.lintDeck",
     "onCommand:premarks.exportHtml",
     "onCommand:premarks.exportPptx",
+    "onCommand:premarks.exportPrint",
     "onCommand:premarks.shareDeck"
   ],
   "main": "./extension.js",
@@ -46,12 +48,20 @@
         "title": "Premarks: Insert Layout, Equation, or Mermaid"
       },
       {
+        "command": "premarks.lintDeck",
+        "title": "Premarks: Lint Presentation Quality"
+      },
+      {
         "command": "premarks.exportHtml",
         "title": "Premarks: Export Animated HTML"
       },
       {
         "command": "premarks.exportPptx",
         "title": "Premarks: Export PowerPoint (.pptx)"
+      },
+      {
+        "command": "premarks.exportPrint",
+        "title": "Premarks: Export Print / PDF"
       },
       {
         "command": "premarks.shareDeck",
@@ -92,9 +102,19 @@
           "group": "premarks@2"
         },
         {
-          "command": "premarks.exportPptx",
+          "command": "premarks.lintDeck",
           "when": "editorLangId == markdown",
           "group": "premarks@3"
+        },
+        {
+          "command": "premarks.exportPptx",
+          "when": "editorLangId == markdown",
+          "group": "premarks@4"
+        },
+        {
+          "command": "premarks.exportPrint",
+          "when": "editorLangId == markdown",
+          "group": "premarks@5"
         }
       ]
     },
@@ -112,10 +132,30 @@
           "default": "http://127.0.0.1:3000",
           "description": "Base URL of your Premarks presentation server."
         },
+        "premarks.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional personal Premarks API key (pm_live_...) for authenticated exports and shares."
+        },
         "premarks.defaultTheme": {
           "type": "string",
           "default": "anime",
-          "enum": ["anime", "theorem", "swiss", "executive", "obsidian", "monograph"],
+          "enum": [
+            "anime",
+            "nordic",
+            "keynote",
+            "blueprint",
+            "atelier",
+            "theorem",
+            "swiss",
+            "executive",
+            "obsidian",
+            "monograph",
+            "beamer-madrid",
+            "metropolis",
+            "editorial-split",
+            "botanical-esg"
+          ],
           "description": "Default Premarks theme applied when exporting or previewing."
         }
       }

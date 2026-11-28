@@ -13,13 +13,15 @@ import { lintDeck } from './lintDeck.ts';
 import {
   buildPrintDocument,
   exportHtmlIsolated,
+  exportPdfWithHeadlessFallback,
   exportPptxIsolated,
 } from './renderService.ts';
-import { applySlideEditById, ensureSlideIds } from './slideIds.ts';
+import { applySlideEditById, ensureSlideIds, splitDeckDocumentRaw } from './slideIds.ts';
 
 const require = createRequire(import.meta.url);
 const { TEMPLATES } = require('../../lib/templates.js');
 const { THEMES, THEME_MAP } = require('../../lib/themes.js');
+const ALL_THEME_IDS = THEMES.map((t: { id: string }) => t.id).join(', ');
 
 export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: string): McpServer {
   const server = new McpServer({
@@ -58,11 +60,12 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
             text: JSON.stringify(
               {
                 templates: filtered.map(
-                  (t: { id: string; title: string; field: string; themeId: string; summary: string }) => ({
+                  (t: { id: string; title: string; field: string; themeId: string; summary: string; markdown: string }) => ({
                     id: t.id,
                     title: t.title,
                     field: t.field,
                     themeId: t.themeId,
+                    slideCount: splitDeckDocumentRaw(t.markdown).rawSlides.length,
                     summary: t.summary,
                   }),
                 ),
@@ -91,7 +94,7 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
         'Create a persistent Premarks deck in PostgreSQL from a template or custom Markdown, returning stable pm-slide-id UUID anchors.',
       inputSchema: {
         title: z.string().min(1).max(140).describe('Presentation title.'),
-        themeId: z.string().optional().describe('Theme ID (anime, theorem, swiss, executive, obsidian, monograph).'),
+        themeId: z.string().optional().describe(`Theme ID (${ALL_THEME_IDS}).`),
         templateId: z.string().optional().describe('Optional starter template ID from list_templates.'),
         markdown: z.string().optional().describe('Full Marp Markdown document. If omitted, scaffolds from templateId or blank.'),
       },
@@ -100,6 +103,17 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
       const tpl = templateId
         ? TEMPLATES.find((t: { id: string }) => t.id === templateId)
         : null;
+      if (templateId && !tpl) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: `Template "${templateId}" not found. Call list_templates for valid IDs.`,
+            },
+          ],
+        };
+      }
       const chosenTheme =
         themeId && THEME_MAP.has(themeId) ? themeId : tpl?.themeId || 'anime';
       const initialMd =
@@ -235,13 +249,21 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
         };
       }
 
-      const edited = applySlideEditById(found.deck.markdown, slideId, {
-        action,
-        markdownBody,
-        speakerNotes,
-        layoutClass,
-        targetPosition,
-      });
+      let edited;
+      try {
+        edited = applySlideEditById(found.deck.markdown, slideId, {
+          action,
+          markdownBody,
+          speakerNotes,
+          layoutClass,
+          targetPosition,
+        });
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: 'text', text: (err as Error).message || 'Slide edit failed.' }],
+        };
+      }
 
       const updated = await updateDeckForUser({
         userId: auth.userId,
@@ -438,14 +460,15 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
   server.registerTool(
     'export',
     {
-      title: 'Export Presentation (HTML, PPTX, Print)',
-      description: 'Compile a Premarks deck in an isolated worker to HTML, PowerPoint (.pptx), or Print HTML.',
+      title: 'Export Presentation (HTML, PPTX, PDF, Print)',
+      description:
+        'Compile a Premarks deck in an isolated worker to HTML, PowerPoint (.pptx), PDF, or Print HTML.',
       inputSchema: {
         deckId: z.string().optional(),
         markdown: z.string().optional(),
-        themeId: z.string().optional(),
+        themeId: z.string().optional().describe(`Theme ID (${ALL_THEME_IDS}).`),
         title: z.string().optional(),
-        format: z.enum(['html', 'pptx', 'print']).default('pptx'),
+        format: z.enum(['html', 'pptx', 'print', 'pdf']).default('pptx'),
       },
     },
     async ({ deckId, markdown, themeId, title, format }) => {
@@ -473,6 +496,8 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
         };
       }
 
+      const validTheme = THEME_MAP.has(targetTheme) ? targetTheme : 'anime';
+
       await recordUsageEvent({
         userId: auth.userId,
         apiKeyId: auth.apiKeyId,
@@ -481,7 +506,7 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
       });
 
       if (format === 'pptx') {
-        const buf = await exportPptxIsolated(targetMd, targetTheme, targetTitle);
+        const buf = await exportPptxIsolated(targetMd, validTheme, targetTitle);
         return {
           content: [
             {
@@ -502,10 +527,51 @@ export function createPremarksMcpServer(auth: AuthenticatedContext, baseOrigin: 
         };
       }
 
+      if (format === 'pdf') {
+        const pdfRes = await exportPdfWithHeadlessFallback(targetMd, validTheme, targetTitle);
+        if (pdfRes.mode === 'pdf') {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    format: 'pdf',
+                    mimeType: pdfRes.contentType,
+                    bytes: pdfRes.buffer.length,
+                    base64: pdfRes.buffer.toString('base64'),
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  format: 'print-html',
+                  mimeType: pdfRes.contentType,
+                  note: 'Headless Chromium not installed on server; returning print-ready HTML document.',
+                  bytes: pdfRes.buffer.length,
+                  html: pdfRes.buffer.toString('utf8'),
+                },
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
       const html =
         format === 'print'
-          ? buildPrintDocument(targetMd, targetTheme, targetTitle)
-          : await exportHtmlIsolated(targetMd, targetTheme, targetTitle);
+          ? buildPrintDocument(targetMd, validTheme, targetTitle)
+          : await exportHtmlIsolated(targetMd, validTheme, targetTitle);
 
       return {
         content: [

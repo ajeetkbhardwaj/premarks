@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Plus } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import type {
   AppView,
@@ -10,7 +10,6 @@ import type {
 } from './types';
 import {
   extractFrontmatterDirective,
-  joinMarpDocument,
   splitMarpDocument,
   updateFrontmatterDirective,
 } from './utils/marpDocument';
@@ -18,7 +17,6 @@ import { TemplatesView } from './components/TemplatesView';
 import { StudioView } from './components/StudioView';
 import { IntegrationsView } from './components/IntegrationsView';
 import { PresenterModal } from './components/PresenterModal';
-import { SlideAgentDrawer } from './components/SlideAgentDrawer';
 import { exportSlidesToPdfBlob } from './utils/pdfExport';
 
 const DECKS_STORAGE_KEY = 'premarks.decks.v1';
@@ -93,7 +91,6 @@ function PremarksApp() {
   const [renderError, setRenderError] = useState<string | null>(null);
 
   const [isDarkUi, setIsDarkUi] = useState<boolean>(false);
-  const [showAgentDrawer, setShowAgentDrawer] = useState<boolean>(false);
 
   // Presenter modal state
   const [presenterOpen, setPresenterOpen] = useState<boolean>(false);
@@ -394,15 +391,6 @@ function PremarksApp() {
     openNewDeckInStudio(title, md, detectedTheme, null);
   };
 
-  const parsedDoc = useMemo(() => splitMarpDocument(markdown), [markdown]);
-  const activeSlideRaw = parsedDoc.slides[activeSlideIndex]?.rawBody || '';
-
-  const handleAgentUpdateSlide = (nextBody: string) => {
-    const bodies = parsedDoc.slides.map((s) => s.rawBody);
-    bodies[activeSlideIndex] = nextBody;
-    handleMarkdownChange(joinMarpDocument(parsedDoc.frontmatter, bodies));
-  };
-
   const slugify = (text: string) =>
     text
       .toLowerCase()
@@ -607,15 +595,17 @@ function PremarksApp() {
             </button>
           </nav>
 
-          {/* Zone 3: Single Google Slides-style Slide Agent button */}
+          {/* Zone 3: Primary New Deck action */}
           <div className="flex items-center shrink-0">
             <button
               type="button"
-              onClick={() => setShowAgentDrawer((v) => !v)}
+              onClick={() =>
+                openNewDeckInStudio('Untitled Deck', BLANK_DECK_MARKDOWN, 'anime', null)
+              }
               className="inline-flex items-center gap-1.5 rounded-lg bg-neutral-950 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-neutral-800 whitespace-nowrap shrink-0 dark:bg-white dark:text-neutral-950 dark:hover:bg-neutral-200"
             >
-              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              Slide Agent
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+              New Deck
             </button>
           </div>
         </div>
@@ -687,21 +677,6 @@ function PremarksApp() {
           templates={templates}
           themes={themes}
           onOpenStudio={() => setView('studio')}
-        />
-      )}
-
-      {showAgentDrawer && (
-        <SlideAgentDrawer
-          themes={themes}
-          activeThemeId={themeId}
-          activeSlideIndex={activeSlideIndex}
-          activeSlideMarkdown={activeSlideRaw}
-          hasActiveSlide={view === 'studio' && parsedDoc.slides.length > 0}
-          onClose={() => setShowAgentDrawer(false)}
-          onCreateDeck={(title, md, chosenTheme) => {
-            openNewDeckInStudio(title, md, chosenTheme, null);
-          }}
-          onUpdateActiveSlide={handleAgentUpdateSlide}
         />
       )}
 

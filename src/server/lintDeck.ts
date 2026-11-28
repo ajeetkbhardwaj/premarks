@@ -68,6 +68,10 @@ export function contrastRatio(hexA: string, hexB: string): number | null {
 
 function estimateVerticalUnits(body: string): number {
   const cleaned = body.replace(/<!--[\s\S]*?-->/g, '');
+  const isMultiColumn =
+    /\b(row|row-3|grid-2x2|bento-grid|kpi-grid|timeline|agenda-list|split|split-60-40|split-40-60|card-list|swot-grid)\b/.test(
+      cleaned,
+    );
   const lines = cleaned.split('\n');
   let units = 0;
   let inCode = false;
@@ -84,12 +88,21 @@ function estimateVerticalUnits(body: string): number {
       units += 22;
       continue;
     }
+    // Ignore pure HTML container tags like <div class="card"> or </div>
+    const withoutTags = t.replace(/<[^>]+>/g, '').trim();
+    if (!withoutTags) continue;
+
     if (t.startsWith('# ')) units += 74;
     else if (t.startsWith('## ')) units += 52;
-    else if (t.startsWith('### ')) units += 38;
-    else if (t.startsWith('|')) units += 32;
+    else if (t.startsWith('### ')) units += 36;
+    else if (t.startsWith('|')) units += 30;
     else if (t.startsWith('$$')) units += 50;
-    else units += 30 + Math.floor(t.length / 85) * 24;
+    else units += 28 + Math.floor(withoutTags.length / 85) * 24;
+  }
+
+  if (isMultiColumn && units > 120) {
+    // Primary heading stays full-width (~74px); grid body shares horizontal columns (~2.1x density)
+    return Math.round(74 + (units - 74) / 2.1);
   }
   return units;
 }

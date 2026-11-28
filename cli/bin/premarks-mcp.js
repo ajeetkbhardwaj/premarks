@@ -2,10 +2,28 @@
 
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const readline = require('readline');
 
-const SERVER_URL = String(process.env.PREMARKS_URL || 'http://127.0.0.1:3000').replace(/\/+$/, '');
-const API_KEY = String(process.env.PREMARKS_API_KEY || '').trim();
+function readSavedConfig() {
+  try {
+    const cfgPath = path.join(os.homedir(), '.premarks.json');
+    if (fs.existsSync(cfgPath)) {
+      return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    }
+  } catch {
+    // Ignore malformed local config
+  }
+  return {};
+}
+
+const saved = readSavedConfig();
+const SERVER_URL = String(
+  process.env.PREMARKS_URL || saved.serverUrl || 'http://127.0.0.1:3000',
+).replace(/\/+$/, '');
+const API_KEY = String(process.env.PREMARKS_API_KEY || saved.apiKey || '').trim();
 
 function writeResponse(obj) {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -19,7 +37,6 @@ async function forwardJsonRpc(rawLine) {
     return;
   }
 
-  // Notifications without an id do not expect a JSON-RPC reply if rejected
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/event-stream',
@@ -91,6 +108,7 @@ async function forwardJsonRpc(rawLine) {
   }
 }
 
+let queue = Promise.resolve();
 const rl = readline.createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
@@ -99,5 +117,5 @@ const rl = readline.createInterface({
 rl.on('line', (line) => {
   const trimmed = line.trim();
   if (!trimmed) return;
-  forwardJsonRpc(trimmed);
+  queue = queue.then(() => forwardJsonRpc(trimmed));
 });

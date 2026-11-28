@@ -119,7 +119,7 @@ export function IntegrationsView({
           mcpServers: {
             premarks: {
               command: 'npx',
-              args: ['-y', `${origin}/api/integrations/cli/premarks-cli.tgz`, 'premarks-mcp'],
+              args: ['-y', '-p', `${origin}/api/integrations/cli/premarks-cli.tgz`, 'premarks-mcp'],
               env: {
                 PREMARKS_URL: origin,
                 PREMARKS_API_KEY: tokenPlaceholder,
@@ -175,6 +175,7 @@ export function IntegrationsView({
     const outExt = selectedFormat === 'print' ? 'print.html' : selectedFormat;
     return [
       `premarks init ${selectedTemplateId} deck.md --theme ${selectedThemeId}`,
+      `premarks lint deck.md`,
       `premarks dev deck.md`,
       `premarks build deck.md -f ${selectedFormat} -o deck.${outExt}`,
       `premarks share deck.md`,
@@ -275,7 +276,7 @@ jobs:
             Premarks for VS Code
           </h2>
           <p className="mt-1.5 max-w-2xl text-sm text-neutral-600 dark:text-neutral-400">
-            Get a live 16:9 side-panel preview as you edit Markdown, insert layout blocks, and export to HTML or PowerPoint without leaving your editor.
+            Get a live 16:9 side-panel preview as you edit Markdown, lint slide density, insert layout blocks, and export to HTML, PowerPoint, or Print/PDF without leaving your editor.
           </p>
 
           <div className="mt-5 flex flex-wrap items-center gap-3">

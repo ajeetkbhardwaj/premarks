@@ -6,7 +6,15 @@ function getConfig() {
   const cfg = vscode.workspace.getConfiguration('premarks');
   const serverUrl = String(cfg.get('serverUrl') || 'http://127.0.0.1:3000').replace(/\/+$/, '');
   const defaultTheme = String(cfg.get('defaultTheme') || 'anime');
-  return { serverUrl, defaultTheme };
+  const apiKey = String(cfg.get('apiKey') || '').trim();
+  return { serverUrl, defaultTheme, apiKey };
+}
+
+function buildHeaders(apiKey, jsonBody = true) {
+  const headers = {};
+  if (jsonBody) headers['Content-Type'] = 'application/json';
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  return headers;
 }
 
 function detectThemeFromMarkdown(md, fallback) {
@@ -31,6 +39,11 @@ const SNIPPET_PICKS = [
     label: 'Two-Column Cards',
     description: 'Side-by-side cards with click-to-reveal fragments',
     snippet: '\n<div class="row">\n\n<div class="card" data-fragment="1">\n\n### Left Card\nKey point or metric.\n\n</div>\n\n<div class="card" data-fragment="2">\n\n### Right Card\nSupporting detail.\n\n</div>\n\n</div>\n',
+  },
+  {
+    label: 'Bento Metric Grid',
+    description: 'Four-tile layout for metrics, highlights, or pillars',
+    snippet: '\n<div class="bento-grid">\n\n<div class="kpi-card" data-fragment="1">\n\n### 99.9%\nReliability SLA\n\n</div>\n\n<div class="kpi-card" data-fragment="2">\n\n### 42 ms\nMedian Latency\n\n</div>\n\n</div>\n',
   },
   {
     label: 'Formula Box (MathJax)',
@@ -72,8 +85,30 @@ function buildPreviewHtml(slides, css) {
   .slide-label { font-size: 11px; color: #a1a1aa; margin-bottom: 6px; letter-spacing: 0.04em; text-transform: uppercase; }
   .marpit > svg { width: 100%; height: auto; display: block; border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.45); background: #fff; }
   ${css}
-  [data-fragment] { opacity: 1 !important; transform: none !important; }
-  .animate-in > *, .card, .formula-box, .table-wrap, blockquote { animation: none !important; opacity: 1 !important; transform: none !important; }
+  [data-fragment],
+  .animate-in > *,
+  .animate-zoom > *,
+  .animate-left > *,
+  .animate-right > *,
+  .animate-blur > *,
+  .animate-pop > *,
+  .stagger-list > li,
+  .card,
+  .kpi-card,
+  .timeline-step,
+  .callout,
+  .meter-fill,
+  .formula-box,
+  .table-wrap,
+  blockquote,
+  .eyebrow {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    clip-path: none !important;
+  }
 </style>
 </head>
 <body>
@@ -102,17 +137,18 @@ ${slidesMarkup}
 function activate(context) {
   let previewPanel = null;
   let debounceTimer = null;
+  let lintOutput = null;
 
   async function renderEditorToPanel(editor) {
     if (!previewPanel || !editor || editor.document.languageId !== 'markdown') return;
-    const { serverUrl, defaultTheme } = getConfig();
+    const { serverUrl, defaultTheme, apiKey } = getConfig();
     const markdown = editor.document.getText();
     const themeId = detectThemeFromMarkdown(markdown, defaultTheme);
 
     try {
       const res = await fetch(`${serverUrl}/api/render`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders(apiKey, true),
         body: JSON.stringify({ markdown, themeId }),
       });
       if (!res.ok) {
@@ -158,9 +194,11 @@ function activate(context) {
   });
 
   const newFromTemplateCmd = vscode.commands.registerCommand('premarks.newFromTemplate', async () => {
-    const { serverUrl } = getConfig();
+    const { serverUrl, apiKey } = getConfig();
     try {
-      const res = await fetch(`${serverUrl}/api/templates`);
+      const res = await fetch(`${serverUrl}/api/templates`, {
+        headers: buildHeaders(apiKey, false),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { templates } = await res.json();
       const picks = (templates || []).map((t) => ({
@@ -198,18 +236,64 @@ function activate(context) {
     });
   });
 
+  const lintDeckCmd = vscode.commands.registerCommand('premarks.lintDeck', async () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      vscode.window.showWarningMessage('Open a Markdown presentation file first.');
+      return;
+    }
+    const { serverUrl, apiKey } = getConfig();
+    const markdown = editor.document.getText();
+    try {
+      const res = await fetch(`${serverUrl}/api/lint`, {
+        method: 'POST',
+        headers: buildHeaders(apiKey, true),
+        body: JSON.stringify({ markdown, autoFix: false }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const report = await res.json();
+      if (!lintOutput) lintOutput = vscode.window.createOutputChannel('Premarks Lint');
+      lintOutput.clear();
+      lintOutput.appendLine(`Premarks Deck Quality Score: ${report.deckScore}/100 (${report.slideCount} slides)`);
+      lintOutput.appendLine(`Status: ${report.passed ? 'PASSED' : 'NEEDS ATTENTION'}`);
+      lintOutput.appendLine('');
+      if (!report.issues || report.issues.length === 0) {
+        lintOutput.appendLine('No layout, contrast, or density issues detected.');
+      } else {
+        for (const issue of report.issues) {
+          const slideRef = issue.slideIndex !== null ? `Slide ${issue.slideIndex + 1}` : 'Deck';
+          lintOutput.appendLine(`[${issue.severity.toUpperCase()}] ${slideRef} (${issue.rule}): ${issue.message}`);
+          lintOutput.appendLine(`  Suggestion: ${issue.suggestion}`);
+        }
+      }
+      lintOutput.show(true);
+      vscode.window.showInformationMessage(
+        `Premarks Lint Score: ${report.deckScore}/100 (${(report.issues || []).length} notice(s)).`,
+      );
+    } catch (err) {
+      vscode.window.showErrorMessage(`Premarks lint failed: ${err.message}`);
+    }
+  });
+
   async function runExport(kind) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
       vscode.window.showWarningMessage('Open a Markdown presentation file first.');
       return;
     }
-    const { serverUrl, defaultTheme } = getConfig();
+    const { serverUrl, defaultTheme, apiKey } = getConfig();
     const markdown = editor.document.getText();
     const themeId = detectThemeFromMarkdown(markdown, defaultTheme);
     const title = detectTitleFromMarkdown(markdown, editor.document.fileName);
-    const endpoint = kind === 'pptx' ? '/api/export-pptx' : '/api/export-html';
-    const ext = kind === 'pptx' ? '.pptx' : '.html';
+
+    const endpoint =
+      kind === 'pptx'
+        ? '/api/export-pptx'
+        : kind === 'print'
+          ? '/api/export-pdf'
+          : '/api/export-html';
+
+    const defaultExt = kind === 'pptx' ? '.pptx' : kind === 'print' ? '.print.html' : '.html';
 
     const baseDir = editor.document.isUntitled
       ? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd())
@@ -217,37 +301,50 @@ function activate(context) {
     const baseName = editor.document.isUntitled
       ? 'presentation'
       : path.basename(editor.document.fileName, path.extname(editor.document.fileName));
-    const defaultUri = vscode.Uri.file(path.join(baseDir, `${baseName}${ext}`));
+    const defaultUri = vscode.Uri.file(path.join(baseDir, `${baseName}${defaultExt}`));
 
-    const targetUri = await vscode.window.showSaveDialog({
-      defaultUri,
-      filters: kind === 'pptx' ? { PowerPoint: ['pptx'] } : { HTML: ['html'] },
-    });
+    const filters =
+      kind === 'pptx'
+        ? { PowerPoint: ['pptx'] }
+        : kind === 'print'
+          ? { 'PDF / Print HTML': ['pdf', 'html'] }
+          : { HTML: ['html'] };
+
+    const targetUri = await vscode.window.showSaveDialog({ defaultUri, filters });
     if (!targetUri) return;
 
     await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: `Exporting Premarks ${ext.toUpperCase()}...` },
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Exporting Premarks ${kind.toUpperCase()}...`,
+      },
       async () => {
         const res = await fetch(`${serverUrl}${endpoint}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: buildHeaders(apiKey, true),
           body: JSON.stringify({ markdown, themeId, title }),
         });
         if (!res.ok) throw new Error(`Export failed (HTTP ${res.status})`);
+        const mode = res.headers.get('X-Export-Mode');
+        let finalPath = targetUri.fsPath;
+        if (kind === 'print' && mode !== 'pdf' && finalPath.toLowerCase().endsWith('.pdf')) {
+          finalPath = finalPath.replace(/\.pdf$/i, '.print.html');
+        }
         const buf = Buffer.from(await res.arrayBuffer());
-        fs.writeFileSync(targetUri.fsPath, buf);
-        vscode.window.showInformationMessage(`Saved ${path.basename(targetUri.fsPath)}`);
+        fs.writeFileSync(finalPath, buf);
+        vscode.window.showInformationMessage(`Saved ${path.basename(finalPath)}`);
       },
     );
   }
 
   const exportHtmlCmd = vscode.commands.registerCommand('premarks.exportHtml', () => runExport('html'));
   const exportPptxCmd = vscode.commands.registerCommand('premarks.exportPptx', () => runExport('pptx'));
+  const exportPrintCmd = vscode.commands.registerCommand('premarks.exportPrint', () => runExport('print'));
 
   const shareDeckCmd = vscode.commands.registerCommand('premarks.shareDeck', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) return;
-    const { serverUrl, defaultTheme } = getConfig();
+    const { serverUrl, defaultTheme, apiKey } = getConfig();
     const markdown = editor.document.getText();
     const themeId = detectThemeFromMarkdown(markdown, defaultTheme);
     const title = detectTitleFromMarkdown(markdown, editor.document.fileName);
@@ -255,7 +352,7 @@ function activate(context) {
     try {
       const res = await fetch(`${serverUrl}/api/shares`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildHeaders(apiKey, true),
         body: JSON.stringify({ title, markdown, themeId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -273,8 +370,10 @@ function activate(context) {
     changeListener,
     newFromTemplateCmd,
     insertBlockCmd,
+    lintDeckCmd,
     exportHtmlCmd,
     exportPptxCmd,
+    exportPrintCmd,
     shareDeckCmd,
   );
 }
