@@ -39,7 +39,10 @@ export function SlideFrame({
   className = '',
 }: SlideFrameProps) {
   const [enhancedHtml, setEnhancedHtml] = useState<string>(slideHtml);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const lastHtmlRef = useRef<string>(slideHtml);
+  const initialStepRef = useRef<number>(fragmentStep);
+  const lastReplayKeyRef = useRef<number>(replayKey);
 
   useEffect(() => {
     let active = true;
@@ -67,8 +70,32 @@ export function SlideFrame({
 
   const srcDoc = useMemo(() => {
     if (!effectiveHtml) return '';
-    return buildSlideFrameDocument(effectiveHtml, css, fragmentStep);
-  }, [effectiveHtml, css, fragmentStep]);
+    return buildSlideFrameDocument(effectiveHtml, css, initialStepRef.current);
+  }, [effectiveHtml, css]);
+
+  useEffect(() => {
+    initialStepRef.current = fragmentStep;
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'pm:set-fragment', step: fragmentStep },
+      '*',
+    );
+  }, [fragmentStep]);
+
+  useEffect(() => {
+    if (replayKey !== lastReplayKeyRef.current) {
+      lastReplayKeyRef.current = replayKey;
+      if (replayKey > 0) {
+        iframeRef.current?.contentWindow?.postMessage({ type: 'pm:replay' }, '*');
+      }
+    }
+  }, [replayKey]);
+
+  const handleIframeLoad = () => {
+    iframeRef.current?.contentWindow?.postMessage(
+      { type: 'pm:set-fragment', step: fragmentStep },
+      '*',
+    );
+  };
 
   const variantClasses = VARIANT_CLASSES[variant];
 
@@ -97,10 +124,11 @@ export function SlideFrame({
       className={`relative aspect-video w-full overflow-hidden bg-white dark:bg-neutral-900 ${variantClasses} ${className}`}
     >
       <iframe
-        key={replayKey > 0 ? replayKey : undefined}
+        ref={iframeRef}
         title={title}
         srcDoc={srcDoc}
-        sandbox=""
+        onLoad={handleIframeLoad}
+        sandbox="allow-scripts"
         className={`block h-full w-full border-0 ${interactive ? '' : 'pointer-events-none'}`}
       />
     </div>

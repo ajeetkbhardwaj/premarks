@@ -29,6 +29,7 @@ export function PresenterModal({
 }: PresenterModalProps) {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const toggleFullscreen = async () => {
     try {
@@ -51,18 +52,71 @@ export function PresenterModal({
   }, []);
 
   useEffect(() => {
+    const postNav = (action: string) => {
+      iframeRef.current?.contentWindow?.postMessage({ type: 'pm:nav', action }, '*');
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement === iframeRef.current) {
+        return;
+      }
       if (e.key === 'Escape' && !isEmbedded && !document.fullscreenElement) {
         onClose();
         return;
       }
       if (e.key.toLowerCase() === 'f' && !isEmbedded) {
         toggleFullscreen();
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        postNav('prev-slide');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        postNav('next-slide');
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        postNav('prev-fragment');
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        postNav('next-fragment');
+      } else if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        postNav('replay');
+      } else if (e.key.toLowerCase() === 'b' || e.key === '.') {
+        e.preventDefault();
+        postNav('blackout');
       }
     };
+    const handleMessage = (e: MessageEvent) => {
+      if (e.source !== iframeRef.current?.contentWindow) return;
+      const data = e.data;
+      if (!data || typeof data !== 'object' || data.type !== 'pm:host-key') return;
+      if (data.key === 'Escape' && !isEmbedded && !document.fullscreenElement) {
+        onClose();
+      } else if (typeof data.key === 'string' && data.key.toLowerCase() === 'f' && !isEmbedded) {
+        toggleFullscreen();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('message', handleMessage);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('message', handleMessage);
+    };
   }, [isEmbedded, onClose]);
+
+  const handleIframeLoad = () => {
+    if (!isEmbedded) {
+      iframeRef.current?.focus();
+      try {
+        iframeRef.current?.contentWindow?.focus();
+      } catch {
+        // Ignore cross-origin focus error in sandboxed iframe
+      }
+    }
+  };
 
   return (
     <div
@@ -79,7 +133,7 @@ export function PresenterModal({
               {title}
             </span>
             <span className="hidden text-xs text-neutral-400 md:inline">
-              Space / Arrows advance · R replay · B blackout · F fullscreen
+              ← → Switch slide · ↑ ↓ Step fragments · R replay · B blackout · F fullscreen
             </span>
           </div>
 
@@ -140,15 +194,19 @@ export function PresenterModal({
           <div className="relative h-full w-full">
             {srcUrl ? (
               <iframe
+                ref={iframeRef}
                 title={title}
                 src={srcUrl}
+                onLoad={handleIframeLoad}
                 sandbox="allow-scripts"
                 className="h-full w-full border-0"
               />
             ) : htmlContent ? (
               <iframe
+                ref={iframeRef}
                 title={title}
                 srcDoc={htmlContent}
+                onLoad={handleIframeLoad}
                 sandbox="allow-scripts"
                 className="h-full w-full border-0"
               />

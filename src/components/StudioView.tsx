@@ -30,7 +30,7 @@ import type {
 import {
   SLIDE_LAYOUT_TEMPLATES,
   SNIPPET_BLOCKS,
-  countSlideFragments,
+  getSlideFragmentSteps,
   joinMarpDocument,
   splitMarpDocument,
 } from '../utils/marpDocument';
@@ -225,8 +225,8 @@ export function StudioView({
 }: StudioViewProps) {
   const [paneMode, setPaneMode] = useState<StudioPaneMode>('split');
   const [editorMode, setEditorMode] = useState<EditorSurfaceMode>('visual');
-  const [fragmentStep, setFragmentStep] = useState<number>(-1);
-  const [replayKey, setReplayKey] = useState<number>(0);
+  const [slideFragmentSteps, setSlideFragmentSteps] = useState<Record<number, number>>({});
+  const [slideReplayKeys, setSlideReplayKeys] = useState<Record<number, number>>({});
 
   const [showAddSlideMenu, setShowAddSlideMenu] = useState<boolean>(false);
   const [showSnippetMenu, setShowSnippetMenu] = useState<boolean>(false);
@@ -254,15 +254,16 @@ export function StudioView({
   const parsed = useMemo(() => splitMarpDocument(markdown), [markdown]);
   const totalSlides = Math.max(parsed.slides.length, rendered?.slides.length || 0);
 
+  const slideFragmentStepsList = useMemo(
+    () => parsed.slides.map((_, idx) => getSlideFragmentSteps(rendered?.slides[idx] || '')),
+    [parsed.slides, rendered?.slides],
+  );
+
   useEffect(() => {
     if (activeSlideIndex >= parsed.slides.length && parsed.slides.length > 0) {
       onChangeActiveSlide(parsed.slides.length - 1);
     }
   }, [activeSlideIndex, onChangeActiveSlide, parsed.slides.length]);
-
-  useEffect(() => {
-    setFragmentStep(-1);
-  }, [activeSlideIndex]);
 
   useEffect(() => {
     if (paneMode !== 'split' && paneMode !== 'preview') return;
@@ -293,12 +294,93 @@ export function StudioView({
     [activeSlide?.rawBody],
   );
 
-  const activeSlideHtml = rendered?.slides[activeSlideIndex] || '';
   const activeSlideCss = rendered?.css || '';
-  const activeFragmentCount = useMemo(
-    () => countSlideFragments(activeSlideHtml),
-    [activeSlideHtml],
-  );
+  const activeSteps = slideFragmentStepsList[activeSlideIndex] || [];
+  const activeFragmentStep = slideFragmentSteps[activeSlideIndex] ?? -1;
+
+  const triggerSlideReplay = (idx: number) => {
+    setSlideReplayKeys((prev) => ({ ...prev, [idx]: (prev[idx] || 0) + 1 }));
+  };
+
+  const stepSlideFragment = (idx: number, direction: -1 | 1) => {
+    if (idx !== activeSlideIndex) {
+      suppressStageScrollRef.current = true;
+      onChangeActiveSlide(idx);
+    }
+    const steps = slideFragmentStepsList[idx] || [];
+    if (steps.length === 0) {
+      triggerSlideReplay(idx);
+      return;
+    }
+    setSlideFragmentSteps((prev) => {
+      const current = prev[idx] ?? -1;
+      let nextStep = current;
+      if (direction === 1) {
+        if (current === -1 || current === 0) {
+          nextStep = steps[0];
+        } else {
+          const pos = steps.indexOf(current);
+          nextStep = pos >= 0 && pos < steps.length - 1 ? steps[pos + 1] : 0;
+        }
+      } else {
+        if (current === -1) {
+          nextStep = steps.length > 1 ? steps[steps.length - 2] : 0;
+        } else if (current === 0) {
+          nextStep = 0;
+        } else {
+          const pos = steps.indexOf(current);
+          nextStep = pos > 0 ? steps[pos - 1] : 0;
+        }
+      }
+      return { ...prev, [idx]: nextStep };
+    });
+  };
+
+  const showAllSlideFragments = (idx: number) => {
+    setSlideFragmentSteps((prev) => ({ ...prev, [idx]: -1 }));
+  };
+
+  const formatStepReadout = (step: number, steps: number[]): string => {
+    if (step === -1) return `All (${steps.length})`;
+    if (step === 0) return `0/${steps.length}`;
+    const pos = steps.indexOf(step);
+    return `${pos >= 0 ? pos + 1 : 0}/${steps.length}`;
+  };
+
+  useEffect(() => {
+    if (paneMode !== 'split' && paneMode !== 'preview') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (showBrandKit || document.querySelector('[role="dialog"]')) return;
+
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        suppressStageScrollRef.current = false;
+        onChangeActiveSlide(Math.max(0, activeSlideIndex - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        suppressStageScrollRef.current = false;
+        onChangeActiveSlide(Math.min(parsed.slides.length - 1, activeSlideIndex + 1));
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        stepSlideFragment(activeSlideIndex, 1);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        stepSlideFragment(activeSlideIndex, -1);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  });
 
   const wordCount = useMemo(() => {
     const clean = (activeSlide?.rawBody || '')
@@ -325,7 +407,9 @@ export function StudioView({
     onChangeActiveSlide(safeIdx);
     const target = parsed.slides[safeIdx];
     if (target && editorRef.current && editorMode === 'markdown') {
-      editorRef.current.focus();
+      if (!fromStageClick) {
+        editorRef.current.focus();
+      }
       editorRef.current.setSelectionRange(target.startOffset, target.startOffset);
       const textBefore = markdown.slice(0, target.startOffset);
       const lineNum = textBefore.split('\n').length;
@@ -1078,7 +1162,7 @@ export function StudioView({
                           value={visualFields.entranceAnim}
                           onChange={(e) => {
                             updateVisualField({ entranceAnim: e.target.value });
-                            setReplayKey((k) => k + 1);
+                            triggerSlideReplay(activeSlideIndex);
                           }}
                           className="mt-1.5 w-full rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs font-medium text-neutral-900 focus:border-neutral-900 focus:outline-none dark:border-neutral-700 dark:bg-neutral-900 dark:text-white"
                         >
@@ -1178,53 +1262,55 @@ export function StudioView({
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {activeSteps.length > 0 && (
+                      <div className="flex items-center gap-0.5 rounded border border-neutral-200 bg-neutral-50 p-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-800">
+                        <button
+                          type="button"
+                          onClick={() => stepSlideFragment(activeSlideIndex, -1)}
+                          disabled={activeFragmentStep === 0}
+                          title="Previous fragment (Up key)"
+                          aria-label="Previous fragment"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-700 hover:bg-neutral-200 disabled:opacity-35 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                        >
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            activeFragmentStep === -1
+                              ? setSlideFragmentSteps((prev) => ({
+                                  ...prev,
+                                  [activeSlideIndex]: 0,
+                                }))
+                              : showAllSlideFragments(activeSlideIndex)
+                          }
+                          title="Reset to 0 or show all fragments"
+                          className="min-w-[48px] rounded px-1.5 py-0.5 text-center font-mono text-[11px] font-semibold text-neutral-800 hover:bg-neutral-200 tabular-nums dark:text-neutral-100 dark:hover:bg-neutral-700"
+                        >
+                          {formatStepReadout(activeFragmentStep, activeSteps)}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => stepSlideFragment(activeSlideIndex, 1)}
+                          title="Next fragment (Down key)"
+                          aria-label="Next fragment"
+                          className="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-700 hover:bg-neutral-200 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                        >
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => setReplayKey((k) => k + 1)}
+                      onClick={() => triggerSlideReplay(activeSlideIndex)}
                       title="Replay slide entrance animations"
                       className="inline-flex h-7 items-center gap-1 rounded border border-neutral-200 bg-neutral-50 px-2 text-[11px] font-medium text-neutral-700 hover:bg-neutral-100 hover:text-neutral-950 whitespace-nowrap shrink-0 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700"
                     >
                       <RotateCcw className="h-3 w-3" aria-hidden="true" />
                       <span className="hidden sm:inline">Replay</span>
                     </button>
-
-                    {activeFragmentCount > 0 && (
-                      <div className="flex items-center gap-1 rounded border border-neutral-200 bg-neutral-50 px-1.5 py-0.5 text-xs dark:border-neutral-700 dark:bg-neutral-800">
-                        <span className="hidden text-[11px] text-neutral-500 sm:inline dark:text-neutral-400">
-                          Step:
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setFragmentStep((prev) =>
-                              prev === -1 ? 0 : Math.max(0, prev - 1),
-                            )
-                          }
-                          className="rounded px-1 text-neutral-700 hover:bg-neutral-200 dark:text-neutral-200 dark:hover:bg-neutral-700"
-                        >
-                          -
-                        </button>
-                        <span className="min-w-[30px] text-center font-mono text-[11px] font-semibold tabular-nums">
-                          {fragmentStep === -1 ? 'All' : `${fragmentStep}/${activeFragmentCount}`}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setFragmentStep((prev) =>
-                              prev === -1
-                                ? 1
-                                : prev >= activeFragmentCount
-                                  ? -1
-                                  : prev + 1,
-                            )
-                          }
-                          className="rounded px-1 text-neutral-700 hover:bg-neutral-200 dark:text-neutral-200 dark:hover:bg-neutral-700"
-                        >
-                          +
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </div>
 
@@ -1238,40 +1324,144 @@ export function StudioView({
                       {renderError}
                     </div>
                   ) : (
-                    <div className="flex w-full flex-col gap-2.5 lg:gap-3">
+                    <div className="flex w-full flex-col gap-3">
                       {parsed.slides.map((slide, idx) => {
                         const isActive = idx === activeSlideIndex;
+                        const steps = slideFragmentStepsList[idx] || [];
+                        const currentStep = slideFragmentSteps[idx] ?? -1;
                         return (
                           <div
                             key={`stage-slide-${idx}-${slide.id || slide.title.slice(0, 12)}`}
                             ref={(el) => {
                               slideStageRefs.current[idx] = el;
                             }}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => selectSlide(idx, true)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                selectSlide(idx, true);
-                              }
-                            }}
-                            aria-label={`Select slide ${idx + 1}: ${slide.title}`}
-                            className={`relative w-full cursor-pointer overflow-hidden rounded-[6px] transition-shadow focus:outline-none ${
+                            className={`overflow-hidden rounded-[6px] bg-white transition-shadow dark:bg-neutral-900 ${
                               isActive
                                 ? 'ring-2 ring-red-700 shadow-md dark:ring-red-500'
                                 : 'ring-1 ring-black/10 hover:ring-neutral-400 dark:ring-white/15 dark:hover:ring-neutral-500'
                             }`}
                           >
-                            <SlideFrame
-                              slideHtml={rendered?.slides[idx] || ''}
-                              css={activeSlideCss}
-                              title={`${deckTitle} — Slide ${idx + 1}: ${slide.title}`}
-                              fragmentStep={isActive ? fragmentStep : -1}
-                              replayKey={isActive ? replayKey : 0}
-                              variant="stream"
-                              placeholderTitle={slide.title || 'Rendering slide preview...'}
-                            />
+                            {/* Single-Page Slide Header & Manual Up/Down Fragment Stepper */}
+                            <div className="flex h-8 items-center justify-between gap-2 border-b border-neutral-200/80 bg-neutral-50/95 px-3 dark:border-neutral-800 dark:bg-neutral-900/95">
+                              <button
+                                type="button"
+                                onClick={() => selectSlide(idx, true)}
+                                className="flex min-w-0 flex-1 items-center gap-2 text-left focus:outline-none"
+                              >
+                                <span
+                                  className={`font-mono text-[11px] font-bold tabular-nums ${
+                                    isActive
+                                      ? 'text-red-700 dark:text-red-400'
+                                      : 'text-neutral-400 dark:text-neutral-500'
+                                  }`}
+                                >
+                                  {String(idx + 1).padStart(2, '0')}
+                                </span>
+                                <span className="truncate text-[11px] font-semibold text-neutral-800 dark:text-neutral-200">
+                                  {slide.title}
+                                </span>
+                                {steps.length > 0 && (
+                                  <span className="hidden font-mono text-[10px] text-neutral-400 sm:inline dark:text-neutral-500">
+                                    · {steps.length} steps
+                                  </span>
+                                )}
+                              </button>
+
+                              <div className="flex shrink-0 items-center gap-1">
+                                {steps.length > 0 && (
+                                  <>
+                                    <div className="flex items-center gap-0.5 rounded border border-neutral-200 bg-white p-0.5 dark:border-neutral-700 dark:bg-neutral-800">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          stepSlideFragment(idx, -1);
+                                        }}
+                                        disabled={currentStep === 0}
+                                        title="Step backward one fragment (Up)"
+                                        aria-label={`Slide ${idx + 1} previous fragment`}
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-neutral-700 hover:bg-neutral-100 disabled:opacity-35 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                                      >
+                                        <ChevronUp className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (currentStep === -1) {
+                                            setSlideFragmentSteps((prev) => ({
+                                              ...prev,
+                                              [idx]: 0,
+                                            }));
+                                          } else {
+                                            showAllSlideFragments(idx);
+                                          }
+                                        }}
+                                        title="Reset to 0 or show all fragments"
+                                        className="min-w-[40px] rounded px-1 font-mono text-[10px] font-semibold text-neutral-700 hover:bg-neutral-100 tabular-nums dark:text-neutral-200 dark:hover:bg-neutral-700"
+                                      >
+                                        {formatStepReadout(currentStep, steps)}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          stepSlideFragment(idx, 1);
+                                        }}
+                                        title="Step forward one fragment (Down)"
+                                        aria-label={`Slide ${idx + 1} next fragment`}
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded text-neutral-700 hover:bg-neutral-100 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                                      >
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+
+                                    {currentStep !== -1 && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          showAllSlideFragments(idx);
+                                        }}
+                                        className="rounded border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-neutral-700 hover:bg-neutral-100 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-200 dark:hover:bg-neutral-700"
+                                      >
+                                        All
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    selectSlide(idx, true);
+                                    triggerSlideReplay(idx);
+                                  }}
+                                  title="Replay entrance animation"
+                                  aria-label={`Replay slide ${idx + 1} animations`}
+                                  className="inline-flex h-6 w-6 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100 hover:text-neutral-950 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div
+                              onClick={() => selectSlide(idx, true)}
+                              aria-label={`Select slide ${idx + 1}: ${slide.title}`}
+                              className="cursor-pointer"
+                            >
+                              <SlideFrame
+                                slideHtml={rendered?.slides[idx] || ''}
+                                css={activeSlideCss}
+                                title={`${deckTitle} — Slide ${idx + 1}: ${slide.title}`}
+                                fragmentStep={currentStep}
+                                replayKey={slideReplayKeys[idx] || 0}
+                                variant="stream"
+                                placeholderTitle={slide.title || 'Rendering slide preview...'}
+                              />
+                            </div>
                           </div>
                         );
                       })}

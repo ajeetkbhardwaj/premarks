@@ -3,19 +3,20 @@
   const FRAGMENT_INDEX_ATTR = 'data-fragment-index';
   const ACTIVE_CLASS = 'fragment-active';
   const VISIBLE_CLASS = 'fragment-visible';
-  const CURRENT_SLIDE_SELECTOR =
-    'section[aria-hidden="false"], section.bespoke-marp-active, section:not([aria-hidden])';
-
-  let fragments = [];
-  let currentIndex = -1;
+  let stepGroups = [];
+  let currentStepIndex = -1;
   let lastActiveSlide = null;
   let blackoutEl = null;
   let touchStartX = null;
 
   function getActiveSlide() {
-    const explicit = document.querySelector('section[aria-hidden="false"], section.bespoke-marp-active');
+    const activeInWrapper = document.querySelector(
+      'svg.bespoke-marp-active section, .bespoke-marp-active section, svg[data-marpit-svg]:not([aria-hidden="true"]) section',
+    );
+    if (activeInWrapper) return activeInWrapper;
+    const explicit = document.querySelector('section.bespoke-marp-active, section[aria-hidden="false"]');
     if (explicit) return explicit;
-    return document.querySelector(CURRENT_SLIDE_SELECTOR);
+    return document.querySelector('section');
   }
 
   function animateCountersInScope(scope) {
@@ -64,17 +65,40 @@
     if (!slide) return;
     lastActiveSlide = slide;
 
-    fragments = Array.from(slide.querySelectorAll(`[${FRAGMENT_ATTR}]`)).sort((a, b) => {
-      const ai = parseInt(a.getAttribute(FRAGMENT_INDEX_ATTR) || a.getAttribute(FRAGMENT_ATTR) || '0', 10);
-      const bi = parseInt(b.getAttribute(FRAGMENT_INDEX_ATTR) || b.getAttribute(FRAGMENT_ATTR) || '0', 10);
-      return ai - bi;
+    const rawNodes = Array.from(slide.querySelectorAll(`[${FRAGMENT_ATTR}]`));
+    const usedSteps = new Set();
+    rawNodes.forEach((el) => {
+      const raw = (el.getAttribute(FRAGMENT_ATTR) || '').trim();
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed > 0) usedSteps.add(parsed);
     });
 
-    fragments.forEach((el, i) => {
-      el.setAttribute(FRAGMENT_INDEX_ATTR, String(i));
-      el.classList.remove(ACTIVE_CLASS, VISIBLE_CLASS);
-      el.querySelectorAll('[data-count-to]').forEach((c) => {
-        delete c.dataset.counted;
+    let autoStep = 1;
+    const groupMap = new Map();
+    rawNodes.forEach((el) => {
+      const raw = (el.getAttribute(FRAGMENT_ATTR) || '').trim();
+      const parsed = parseInt(raw, 10);
+      let step = parsed;
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        while (usedSteps.has(autoStep)) autoStep += 1;
+        step = autoStep;
+        usedSteps.add(autoStep);
+        autoStep += 1;
+      }
+      if (!groupMap.has(step)) groupMap.set(step, []);
+      groupMap.get(step).push(el);
+    });
+
+    const sortedSteps = Array.from(groupMap.keys()).sort((a, b) => a - b);
+    stepGroups = sortedSteps.map((step) => groupMap.get(step));
+
+    stepGroups.forEach((group, groupIdx) => {
+      group.forEach((el) => {
+        el.setAttribute(FRAGMENT_INDEX_ATTR, String(groupIdx));
+        el.classList.remove(ACTIVE_CLASS, VISIBLE_CLASS);
+        el.querySelectorAll('[data-count-to]').forEach((c) => {
+          delete c.dataset.counted;
+        });
       });
     });
 
@@ -87,53 +111,63 @@
     animateCountersInScope(slide);
     replayMetersInScope(slide);
 
-    currentIndex = -1;
+    currentStepIndex = -1;
     updateSlideProgress();
   }
 
   function showFragment(targetIndex) {
-    if (fragments.length === 0) return;
+    if (stepGroups.length === 0) return;
 
-    targetIndex = Math.max(-1, Math.min(targetIndex, fragments.length - 1));
+    targetIndex = Math.max(-1, Math.min(targetIndex, stepGroups.length - 1));
 
-    if (targetIndex > currentIndex) {
-      for (let i = currentIndex + 1; i <= targetIndex; i++) {
-        const el = fragments[i];
-        if (el) {
+    if (targetIndex > currentStepIndex) {
+      for (let g = currentStepIndex + 1; g <= targetIndex; g++) {
+        const group = stepGroups[g] || [];
+        group.forEach((el) => {
           requestAnimationFrame(() => {
-            el.classList.add(ACTIVE_CLASS, VISIBLE_CLASS);
+            el.classList.add(VISIBLE_CLASS);
+            if (g === targetIndex) {
+              el.classList.add(ACTIVE_CLASS);
+            } else {
+              el.classList.remove(ACTIVE_CLASS);
+            }
             animateCountersInScope(el);
             replayMetersInScope(el);
           });
-        }
+        });
       }
-    } else if (targetIndex < currentIndex) {
-      for (let i = currentIndex; i > targetIndex; i--) {
-        const el = fragments[i];
-        if (el) {
+      for (let g = 0; g < targetIndex; g++) {
+        (stepGroups[g] || []).forEach((el) => el.classList.remove(ACTIVE_CLASS));
+      }
+    } else if (targetIndex < currentStepIndex) {
+      for (let g = currentStepIndex; g > targetIndex; g--) {
+        const group = stepGroups[g] || [];
+        group.forEach((el) => {
           el.classList.remove(ACTIVE_CLASS, VISIBLE_CLASS);
           el.querySelectorAll('[data-count-to]').forEach((c) => {
             delete c.dataset.counted;
           });
-        }
+        });
       }
     }
 
-    currentIndex = targetIndex;
+    currentStepIndex = targetIndex;
     updateSlideProgress();
   }
 
   function nextFragment() {
-    if (currentIndex < fragments.length - 1) {
-      showFragment(currentIndex + 1);
+    if (stepGroups.length === 0) return false;
+    if (currentStepIndex < stepGroups.length - 1) {
+      showFragment(currentStepIndex + 1);
       return true;
     }
     return false;
   }
 
   function prevFragment() {
-    if (currentIndex > -1) {
-      showFragment(currentIndex - 1);
+    if (stepGroups.length === 0) return false;
+    if (currentStepIndex > -1) {
+      showFragment(currentStepIndex - 1);
       return true;
     }
     return false;
@@ -161,7 +195,7 @@
     });
     animateCountersInScope(slide);
     replayMetersInScope(slide);
-    if (fragments.length > 0) {
+    if (stepGroups.length > 0) {
       resetFragments();
     }
   }
@@ -181,11 +215,20 @@
 
   function updateSlideProgress() {
     const slide = getActiveSlide();
-    if (!slide) return;
-    if (fragments.length > 0) {
-      slide.setAttribute('data-fragment-progress', `${currentIndex + 1}/${fragments.length}`);
+    const counter = document.querySelector('.fragment-counter');
+    if (stepGroups.length > 0) {
+      const label = `${currentStepIndex + 1}/${stepGroups.length}`;
+      if (slide) slide.setAttribute('data-fragment-progress', label);
+      if (counter) {
+        counter.textContent = `Step ${label}`;
+        counter.style.opacity = '0.85';
+      }
     } else {
-      slide.removeAttribute('data-fragment-progress');
+      if (slide) slide.removeAttribute('data-fragment-progress');
+      if (counter) {
+        counter.textContent = '';
+        counter.style.opacity = '0';
+      }
     }
   }
 
@@ -197,34 +240,62 @@
 
       if (e.key === 'b' || e.key === 'B' || e.key === '.') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         toggleBlackout();
         return;
       }
 
       if (e.key === 'r' || e.key === 'R') {
         e.preventDefault();
+        e.stopImmediatePropagation();
         replaySlideAnimations();
         return;
       }
 
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
-        if (!nextFragment()) {
-          dispatchBespokeNext();
-        } else {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        nextFragment();
+        return;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        prevFragment();
+        return;
+      }
+
+      if (e.key === ' ' || e.key === 'PageDown') {
+        if (nextFragment()) {
           e.preventDefault();
+          e.stopImmediatePropagation();
         }
-      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-        if (!prevFragment()) {
-          dispatchBespokePrev();
-        } else {
+        return;
+      }
+
+      if (e.key === 'PageUp') {
+        if (prevFragment()) {
           e.preventDefault();
+          e.stopImmediatePropagation();
         }
-      } else if (e.key === 'Home') {
+        return;
+      }
+
+      if (e.key === 'Home') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         resetFragments();
       } else if (e.key === 'End') {
-        showFragment(fragments.length - 1);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        showFragment(stepGroups.length - 1);
+      } else if (e.key === 'Escape' || e.key === 'f' || e.key === 'F') {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({ type: 'pm:host-key', key: e.key }, '*');
+        }
       }
-    });
+    }, true);
 
     document.addEventListener('click', (e) => {
       if (e.target && e.target.closest && e.target.closest('[data-bespoke-marp-osc], a, button')) return;
@@ -249,19 +320,44 @@
       touchStartX = null;
       if (Math.abs(dx) < 48) return;
       if (dx < 0) {
-        if (!nextFragment()) dispatchBespokeNext();
-      } else if (!prevFragment()) {
+        dispatchBespokeNext();
+      } else {
         dispatchBespokePrev();
       }
     }, { passive: true });
   }
 
   function dispatchBespokeNext() {
+    const btn = document.querySelector('[data-bespoke-marp-osc="next"]');
+    if (btn && typeof btn.click === 'function') {
+      btn.click();
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', keyCode: 39, which: 39, bubbles: true }));
     document.dispatchEvent(new CustomEvent('bespoke:next'));
   }
 
   function dispatchBespokePrev() {
+    const btn = document.querySelector('[data-bespoke-marp-osc="prev"]');
+    if (btn && typeof btn.click === 'function') {
+      btn.click();
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', keyCode: 37, which: 37, bubbles: true }));
     document.dispatchEvent(new CustomEvent('bespoke:prev'));
+  }
+
+  function bindMessages() {
+    window.addEventListener('message', (e) => {
+      const data = e.data;
+      if (!data || typeof data !== 'object' || data.type !== 'pm:nav') return;
+      if (data.action === 'next-fragment') nextFragment();
+      else if (data.action === 'prev-fragment') prevFragment();
+      else if (data.action === 'next-slide') dispatchBespokeNext();
+      else if (data.action === 'prev-slide') dispatchBespokePrev();
+      else if (data.action === 'replay') replaySlideAnimations();
+      else if (data.action === 'blackout') toggleBlackout();
+    });
   }
 
   function onSlideChange() {
@@ -290,22 +386,11 @@
     }
     scanFragments();
     bindKeys();
+    bindMessages();
     observeBespokeSlides();
+    window.addEventListener('hashchange', onSlideChange);
     document.addEventListener('bespoke:slidechange', onSlideChange);
     document.addEventListener('bespoke:activate', onSlideChange);
-
-    if (window.Marp && window.Marp.Bespoke) {
-      const originalNext = window.Marp.Bespoke.prototype.next;
-      const originalPrev = window.Marp.Bespoke.prototype.prev;
-      window.Marp.Bespoke.prototype.next = function (...args) {
-        if (!nextFragment()) return originalNext.apply(this, args);
-        return true;
-      };
-      window.Marp.Bespoke.prototype.prev = function (...args) {
-        if (!prevFragment()) return originalPrev.apply(this, args);
-        return true;
-      };
-    }
   }
 
   init();

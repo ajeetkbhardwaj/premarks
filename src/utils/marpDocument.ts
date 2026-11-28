@@ -141,44 +141,42 @@ export function extractFrontmatterDirective(markdown: string, key: string): stri
   return match ? match[1].trim().replace(/^['"]|['"]$/g, '') : null;
 }
 
+export function getSlideFragmentSteps(slideHtml: string): number[] {
+  if (!slideHtml) return [];
+  const matches = [...slideHtml.matchAll(/data-fragment(?:=(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/gi)];
+  if (matches.length === 0) return [];
+
+  const steps = new Set<number>();
+  let autoStep = 1;
+  for (const m of matches) {
+    const raw = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    const parsed = parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      steps.add(parsed);
+    } else {
+      while (steps.has(autoStep)) autoStep += 1;
+      steps.add(autoStep);
+      autoStep += 1;
+    }
+  }
+  return Array.from(steps).sort((a, b) => a - b);
+}
+
 export function countSlideFragments(slideHtml: string): number {
-  const matches = slideHtml.match(/data-fragment=/g);
-  return matches ? matches.length : 0;
+  return getSlideFragmentSteps(slideHtml).length;
 }
 
 /**
  * Wraps a rendered Marp slide SVG + CSS into an isolated, self-contained HTML document
- * suitable for rendering inside a sandboxed 16:9 iframe without style leakage.
+ * suitable for rendering inside a sandboxed 16:9 iframe with live postMessage fragment
+ * stepping and animation replay (no iframe reload needed per step).
  */
 export function buildSlideFrameDocument(
   slideHtml: string,
   css: string,
   fragmentStep: number = -1,
 ): string {
-  let fragmentVisibilityCss = '';
-  if (fragmentStep === -1) {
-    fragmentVisibilityCss = `
-      [data-fragment] {
-        opacity: 1 !important;
-        transform: none !important;
-        filter: none !important;
-      }
-    `;
-  } else {
-    const rules: string[] = [];
-    for (let s = 1; s <= fragmentStep; s++) {
-      rules.push(
-        `[data-fragment="${s}"] { opacity: 1 !important; transform: none !important; filter: none !important; }`,
-      );
-    }
-    fragmentVisibilityCss = `
-      [data-fragment] {
-        opacity: 0.14 !important;
-        transition: opacity 280ms ease, transform 280ms ease, filter 280ms ease !important;
-      }
-      ${rules.join('\n')}
-    `;
-  }
+  const initialStep = Number.isFinite(fragmentStep) ? fragmentStep : -1;
 
   return `<!doctype html>
 <html>
@@ -212,13 +210,153 @@ export function buildSlideFrameDocument(
     shape-rendering: geometricPrecision;
   }
   ${css}
-  ${fragmentVisibilityCss}
+  [data-fragment] {
+    opacity: 0.14;
+    transition: opacity 0.42s cubic-bezier(0, 0, 0.2, 1), transform 0.42s cubic-bezier(0, 0, 0.2, 1), filter 0.42s cubic-bezier(0, 0, 0.2, 1);
+  }
+  [data-fragment]:not(.fragment-visible) {
+    animation: none !important;
+    opacity: 0.14 !important;
+  }
+  [data-fragment].fragment-visible {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: blur(0) !important;
+  }
+  [data-fragment].fragment-visible:not(.fragment-active) {
+    animation: none !important;
+  }
 </style>
 </head>
 <body>
 <div class="marpit">
 ${slideHtml}
 </div>
+<script>
+(() => {
+  const ANIM_CLASSES = ['animate-in', 'animate-zoom', 'animate-left', 'animate-right', 'animate-blur', 'animate-pop'];
+
+  function animateCounters(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('[data-count-to]').forEach((el) => {
+      if (el.dataset.counted === '1') return;
+      const targetRaw = el.getAttribute('data-count-to');
+      const target = parseFloat(targetRaw || '');
+      if (!Number.isFinite(target)) return;
+      el.dataset.counted = '1';
+      const prefix = el.getAttribute('data-prefix') || '';
+      const suffix = el.getAttribute('data-suffix') || '';
+      const decimals = (targetRaw.split('.')[1] || '').length;
+      const duration = Math.min(1100, Math.max(400, parseInt(el.getAttribute('data-duration') || '700', 10)));
+      const start = performance.now();
+      function tick(now) {
+        const progress = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = prefix + (target * eased).toFixed(decimals) + suffix;
+        if (progress < 1) requestAnimationFrame(tick);
+        else el.textContent = prefix + target.toFixed(decimals) + suffix;
+      }
+      requestAnimationFrame(tick);
+    });
+  }
+
+  function replayMeters(scope) {
+    if (!scope) return;
+    scope.querySelectorAll('.meter-fill').forEach((bar) => {
+      bar.style.animation = 'none';
+      void bar.offsetWidth;
+      bar.style.animation = '';
+    });
+  }
+
+  function getFragmentsWithSteps() {
+    const nodes = Array.from(document.querySelectorAll('[data-fragment]'));
+    let autoStep = 1;
+    const used = new Set();
+    nodes.forEach((el) => {
+      const raw = (el.getAttribute('data-fragment') || '').trim();
+      const parsed = parseInt(raw, 10);
+      if (Number.isFinite(parsed) && parsed > 0) used.add(parsed);
+    });
+    return nodes.map((el) => {
+      const raw = (el.getAttribute('data-fragment') || '').trim();
+      const parsed = parseInt(raw, 10);
+      let step = parsed;
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        while (used.has(autoStep)) autoStep += 1;
+        step = autoStep;
+        used.add(autoStep);
+        autoStep += 1;
+      }
+      return { el, step };
+    });
+  }
+
+  let lastAppliedStep = ${initialStep};
+
+  function applyStep(step) {
+    const items = getFragmentsWithSteps();
+    if (lastAppliedStep === -1 && step > 0) {
+      items.forEach(({ el }) => {
+        el.classList.remove('fragment-visible', 'fragment-active');
+      });
+      void document.body.offsetWidth;
+    }
+    lastAppliedStep = step;
+    items.forEach(({ el, step: fragStep }) => {
+      const wasVisible = el.classList.contains('fragment-visible');
+      const shouldShow = step === -1 || fragStep <= step;
+      if (shouldShow) {
+        el.classList.add('fragment-visible');
+        if (step !== -1 && fragStep === step) {
+          el.classList.add('fragment-active');
+        } else {
+          el.classList.remove('fragment-active');
+        }
+        if (!wasVisible && step !== -1) {
+          el.querySelectorAll('[data-count-to]').forEach((c) => { delete c.dataset.counted; });
+          animateCounters(el);
+          replayMeters(el);
+        }
+      } else {
+        el.classList.remove('fragment-visible', 'fragment-active');
+        el.querySelectorAll('[data-count-to]').forEach((c) => { delete c.dataset.counted; });
+      }
+    });
+  }
+
+  function replayAll() {
+    const section = document.querySelector('section');
+    if (!section) return;
+    const activeClasses = ANIM_CLASSES.filter((cls) => section.classList.contains(cls));
+    if (activeClasses.length > 0) {
+      activeClasses.forEach((cls) => section.classList.remove(cls));
+      void section.offsetWidth;
+      activeClasses.forEach((cls) => section.classList.add(cls));
+    }
+    section.querySelectorAll('.stagger-list > li').forEach((li) => {
+      li.style.animation = 'none';
+      void li.offsetWidth;
+      li.style.animation = '';
+    });
+    section.querySelectorAll('[data-count-to]').forEach((c) => { delete c.dataset.counted; });
+    animateCounters(section);
+    replayMeters(section);
+  }
+
+  window.addEventListener('message', (e) => {
+    const data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'pm:set-fragment') {
+      applyStep(typeof data.step === 'number' ? data.step : -1);
+    } else if (data.type === 'pm:replay') {
+      replayAll();
+    }
+  });
+
+  applyStep(${initialStep});
+})();
+</script>
 </body>
 </html>`;
 }

@@ -131,7 +131,13 @@ export function buildPrintDocument(markdown: string, themeId = 'anime', title = 
 <title>${safeTitle}</title>
 <style>
   @page { size: 1280px 720px; margin: 0; }
-  html, body { margin: 0; padding: 0; background: #fff; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   div.marpit > svg[data-marpit-svg] {
     display: block;
     width: 100vw;
@@ -140,9 +146,33 @@ export function buildPrintDocument(markdown: string, themeId = 'anime', title = 
     break-after: page;
   }
   ${compiled.css}
-  [data-fragment] { opacity: 1 !important; transform: none !important; }
-  .animate-in > *, .card, .formula-box, .table-wrap, blockquote {
-    animation: none !important; opacity: 1 !important; transform: none !important;
+  section, section * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  [data-fragment],
+  .animate-in > *,
+  .animate-zoom > *,
+  .animate-left > *,
+  .animate-right > *,
+  .animate-blur > *,
+  .animate-pop > *,
+  .stagger-list > li,
+  .card,
+  .kpi-card,
+  .timeline-step,
+  .callout,
+  .meter-fill,
+  .formula-box,
+  .table-wrap,
+  blockquote,
+  .eyebrow {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+    clip-path: none !important;
   }
 </style>
 </head>

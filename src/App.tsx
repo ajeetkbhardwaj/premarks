@@ -19,6 +19,7 @@ import { StudioView } from './components/StudioView';
 import { IntegrationsView } from './components/IntegrationsView';
 import { PresenterModal } from './components/PresenterModal';
 import { SlideAgentDrawer } from './components/SlideAgentDrawer';
+import { exportSlidesToPdfBlob } from './utils/pdfExport';
 
 const DECKS_STORAGE_KEY = 'premarks.decks.v1';
 const ACTIVE_ID_KEY = 'premarks.activeDeckId.v1';
@@ -476,13 +477,40 @@ function PremarksApp() {
       return;
     }
 
+    let slidesHtml = rendered?.slides || [];
+    let slideCss = rendered?.css || '';
+    if (slidesHtml.length === 0) {
+      const renderRes = await fetch('/api/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ markdown, themeId }),
+      });
+      if (renderRes.ok) {
+        const compiled = await renderRes.json();
+        slidesHtml = compiled.slides || [];
+        slideCss = compiled.css || '';
+      }
+    }
+
+    if (slidesHtml.length > 0) {
+      try {
+        const pdfBlob = await exportSlidesToPdfBlob(slidesHtml, slideCss, deckTitle);
+        triggerDownload(pdfBlob, `${slugify(deckTitle)}.pdf`, 'application/pdf');
+        return;
+      } catch {
+        // Fallback to print iframe if browser blocks SVG canvas rasterization
+      }
+    }
+
     const html = await res.text();
     const frame = document.createElement('iframe');
     frame.style.position = 'fixed';
     frame.style.right = '0';
     frame.style.bottom = '0';
-    frame.style.width = '0';
-    frame.style.height = '0';
+    frame.style.width = '1280px';
+    frame.style.height = '720px';
+    frame.style.opacity = '0';
+    frame.style.pointerEvents = 'none';
     frame.style.border = '0';
     frame.srcdoc = html;
     document.body.appendChild(frame);
@@ -491,7 +519,7 @@ function PremarksApp() {
         frame.contentWindow?.focus();
         frame.contentWindow?.print();
       } finally {
-        setTimeout(() => frame.remove(), 2000);
+        setTimeout(() => frame.remove(), 5000);
       }
     };
   };

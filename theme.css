@@ -677,10 +677,19 @@ pre code { background: transparent; color: inherit; padding: 0; font-size: inher
 }
 [data-fragment][data-anim="flip"] { transform: perspective(700px) rotateX(12deg) translateY(8px); }
 
+[data-fragment]:not(.fragment-visible) {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
 [data-fragment].fragment-visible {
-  opacity: 1;
-  transform: none;
-  filter: blur(0);
+  opacity: 1 !important;
+  transform: none !important;
+  filter: blur(0) !important;
+}
+
+[data-fragment].fragment-visible:not(.fragment-active) {
+  animation: none !important;
 }
 
 [data-fragment].fragment-active {
@@ -877,18 +886,13 @@ section[data-fragment-progress] .fragment-counter {
 }
 
 @media print {
-  section { background: #ffffff !important; color: #000000 !important; }
-  section::before { display: none; }
-  header, footer { display: none; }
-  pre { box-shadow: none; border: 1px solid #ccc; background: #fafafa !important; color: #000 !important; }
-  code:not(pre code) { background: #f0f0f0 !important; color: #000 !important; }
-  .card, .kpi-card, .timeline-step, .callout, .formula-box, .table-wrap, .media figure, blockquote { box-shadow: none; border: 1px solid #ddd; background: #fff !important; }
-  .eyebrow { border-color: #ccc; background: #f5f5f5; color: #333; }
-  .pill { border-color: #ccc; background: #f0f0f0; color: #333; }
-  section.closing { background: #000 !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  section, section *, header, footer, .card, .kpi-card, .timeline-step, .callout, .formula-box, .table-wrap, blockquote {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 
   .animate-in > *, .animate-zoom > *, .animate-left > *, .animate-right > *, .animate-blur > *, .animate-pop > *,
-  .stagger-list > li, .card, .kpi-card, .timeline-step, .callout, .meter-fill, .formula-box, .table-wrap, blockquote, .eyebrow, .morph-target {
+  .stagger-list > li, .card, .kpi-card, .timeline-step, .callout, .meter-fill, .formula-box, .table-wrap, blockquote, .eyebrow, .morph-target, [data-fragment] {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;

@@ -67,6 +67,8 @@ async function runHtmlExport(markdown: string, themeId: string) {
       '--no-stdin',
       '--theme-set',
       themePath,
+      '--theme',
+      safeTheme.id,
       '--html',
       mdPath,
       '-o',
